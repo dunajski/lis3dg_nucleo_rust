@@ -6,6 +6,7 @@ use panic_halt as _;
 
 use stm32g0::stm32g071::{self, interrupt, Interrupt, NVIC};
 
+mod spi;
 mod uart;
 
 static mut G_BLINK_RATE: u32 = 0xFF_FF;
@@ -48,9 +49,11 @@ fn main() -> ! {
     let gpioc_r = &p.GPIOC;
     gpioc_r.moder.write(unsafe { |w| w.moder13().bits(0b00) });
 
-    uart::init_uart();
+    uart::init();
 
     uart::put_to_serial(b"Application started.\n");
+
+    spi::init();
 
     loop {
         handle_blinking();
@@ -82,14 +85,8 @@ fn TIM3() {
     static mut KEY_CNT: u16 = 0;
     const DEBOUNCING_TIME: u16 = 20; // 20 ms
     unsafe {
-        let press_state: bool;
-
         let gpioc = stm32g071::Peripherals::steal().GPIOC;
-        if gpioc.idr.read().idr13().bit_is_clear() {
-            press_state = true;
-        } else {
-            press_state = false;
-        }
+        let press_state: bool = gpioc.idr.read().idr13().bit_is_clear();
 
         // clear ISR invoking bit
         let tim3 = stm32g071::Peripherals::steal().TIM3;
@@ -108,6 +105,7 @@ fn TIM3() {
                         change_blinking_ratio();
                         let msg = b"Blue button was pressed\n";
                         uart::put_to_serial(msg);
+                        spi::put_to_serial(&[0x8F]); // WHO_AM_I command + R/W bit set
                     }
                     *KEY_LEVEL = ButtonState::Pressed;
                 }

@@ -40,10 +40,10 @@ impl CircularBuff {
         (byte, byte_found)
     }
 
-    fn get_bytes(&mut self) -> () {
+    fn get_bytes(&mut self) {
         loop {
             let (byte, result) = self.get_byte();
-            if result == false {
+            if !result {
                 break;
             } else {
                 put_to_serial(&[byte]);
@@ -63,7 +63,7 @@ static mut RX_CBUF: CircularBuff = CircularBuff {
     ri: 0,
 };
 
-pub fn init_uart() {
+pub fn init() {
     let usart2_r = unsafe { stm32g071::Peripherals::steal().USART2 };
     let gpioa_r = unsafe { stm32g071::Peripherals::steal().GPIOA };
 
@@ -155,7 +155,7 @@ fn USART2() {
 
         unsafe {
             let (byte, result) = TX_CBUF.get_byte();
-            if result == false {
+            if !result {
                 usart2_r.cr1.modify(|_, w| w.tcie().clear_bit());
             } else {
                 usart2_r.tdr.write(|w| w.bits(byte as u32));
