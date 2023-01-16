@@ -6,6 +6,7 @@ use panic_halt as _;
 
 use stm32g0::stm32g071::{self, interrupt, Interrupt, NVIC};
 
+mod circular_buffer;
 mod spi;
 mod uart;
 
@@ -51,13 +52,15 @@ fn main() -> ! {
 
     uart::init();
 
-    uart::put_to_serial(b"Application started.\n");
+    uart::logger(b"Application started.\n");
 
     spi::init();
 
     loop {
         handle_blinking();
-        uart::rx_buffer_read();
+        // send all data prepared in TX buffer
+        // uart::rx_buffer_read();
+        //lis3dh::service();
     }
 }
 
@@ -104,8 +107,8 @@ fn TIM3() {
                     if press_state {
                         change_blinking_ratio();
                         let msg = b"Blue button was pressed\n";
-                        uart::put_to_serial(msg);
-                        spi::put_to_serial(&[0x8F]); // WHO_AM_I command + R/W bit set
+                        uart::logger(msg);
+                        spi::logger(&[0x8F, 0xFF]); // WHO_AM_I command + R/W bit set
                     }
                     *KEY_LEVEL = ButtonState::Pressed;
                 }

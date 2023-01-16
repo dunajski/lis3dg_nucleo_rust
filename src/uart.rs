@@ -1,64 +1,16 @@
 use stm32g0::stm32g071::{self, interrupt, Interrupt, NVIC};
 
+use crate::circular_buffer as cbuf;
+
 const BUFF_SIZE: usize = 1024;
-struct CircularBuff {
-    buf: [u8; BUFF_SIZE],
-    ri: usize,
-    wi: usize,
-}
-
-impl CircularBuff {
-    fn put_byte(&mut self, byte: u8) {
-        self.buf[self.wi] = byte;
-
-        if self.wi == BUFF_SIZE - 1 {
-            self.wi = 0;
-        } else {
-            self.wi += 1;
-        }
-    }
-
-    fn put_bytes(&mut self, bytes: &[u8]) {
-        for b in bytes {
-            self.put_byte(*b);
-        }
-    }
-
-    fn get_byte(&mut self) -> (u8, bool) {
-        let mut byte_found = false;
-        let mut byte = b'\0';
-        if self.wi != self.ri {
-            byte = self.buf[self.ri];
-            byte_found = true;
-
-            if self.ri == BUFF_SIZE - 1 {
-                self.ri = 0;
-            } else {
-                self.ri += 1;
-            }
-        }
-        (byte, byte_found)
-    }
-
-    fn get_bytes(&mut self) {
-        loop {
-            let (byte, result) = self.get_byte();
-            if !result {
-                break;
-            } else {
-                put_to_serial(&[byte]);
-            }
-        }
-    }
-}
-
-static mut TX_CBUF: CircularBuff = CircularBuff {
-    buf: [0; BUFF_SIZE],
+static mut USART_RX: cbuf::CircularBuff<u8, BUFF_SIZE> = cbuf::CircularBuff {
+    buf: [0u8; BUFF_SIZE],
     wi: 0,
     ri: 0,
 };
-static mut RX_CBUF: CircularBuff = CircularBuff {
-    buf: [0; BUFF_SIZE],
+
+static mut USART_TX: cbuf::CircularBuff<u8, BUFF_SIZE> = cbuf::CircularBuff {
+    buf: [0u8; BUFF_SIZE],
     wi: 0,
     ri: 0,
 };
@@ -118,21 +70,18 @@ pub fn init() {
     });
 }
 
-pub fn put_to_serial(buff: &[u8]) {
+pub fn logger(buff: &[u8]) {
     let usart2_r = unsafe { stm32g071::Peripherals::steal().USART2 };
     unsafe {
-        TX_CBUF.put_bytes(buff);
-        let (byte, _) = TX_CBUF.get_byte();
-
-        usart2_r.tdr.write(|w| w.bits(byte as u32));
-
-        usart2_r.cr1.modify(|_, w| w.tcie().set_bit());
+        USART_TX.put_all_data(buff);
     }
+    usart2_r.cr1.modify(|_, w| w.tcie().set_bit());
 }
 
 pub fn rx_buffer_read() {
     unsafe {
-        RX_CBUF.get_bytes();
+        // TODO put to logger - something like local echo
+        USART_RX.get_all_data();
     }
 }
 
@@ -142,10 +91,10 @@ fn USART2() {
 
     // receive buffer not empty isr
     if usart2_r.isr.read().rxne().bit_is_set() {
-        let byte = usart2_r.rdr.read().bits() as u8;
+        let data = usart2_r.rdr.read().bits() as u8;
 
         unsafe {
-            RX_CBUF.put_byte(byte);
+            USART_RX.put_data(data);
         }
     }
 
@@ -154,11 +103,10 @@ fn USART2() {
         usart2_r.icr.write(|w| w.tccf().set_bit());
 
         unsafe {
-            let (byte, result) = TX_CBUF.get_byte();
-            if !result {
-                usart2_r.cr1.modify(|_, w| w.tcie().clear_bit());
+            if let Some(data) = USART_TX.get_data() {
+                usart2_r.tdr.write(|w| w.bits(data as u32));
             } else {
-                usart2_r.tdr.write(|w| w.bits(byte as u32));
+                usart2_r.cr1.modify(|_, w| w.tcie().clear_bit());
             }
         }
     }
